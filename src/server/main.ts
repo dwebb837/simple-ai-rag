@@ -23,28 +23,39 @@ app.use((req, res, next) => {
   next();
 });
 
-// Robust chat endpoint
+// Robust chat api endpoint
 app.post('/api/chat', async (req, res) => {
   try {
-    // Validate input
-    if (!req.body?.question) {
-      return res.status(400).json({ error: "Missing question" });
+    // Destructure both question and context from request body
+    const { question, context } = req.body;
+    
+    if (!question) {
+      return res.status(400).json({ error: "Missing question parameter" });
     }
 
-    // Process request
-    const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [{ role: "user", content: req.body.question }],
-      max_tokens: 150
+    // Build context-aware prompt
+    const messages: any = [];
+    if (context) {
+      messages.push({
+        role: "system",
+        content: `Use this context to answer the question: ${context}`
+      });
+    }
+    messages.push({
+      role: "user",
+      content: question
     });
 
-    // Send response
-    return res.json({ reply: completion.choices[0].message.content });
+    // Get completion from OpenAI
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: messages
+    });
 
+    res.json({ reply: completion.choices[0].message.content });
   } catch (error) {
-    // Error handling
     console.error("API Error:", error);
-    return res.status(500).json({ error: "AI service unavailable" });
+    res.status(500).json({ error: "AI service unavailable" });
   }
 });
 

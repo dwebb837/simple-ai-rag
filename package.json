@@ -9,6 +9,7 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@headlessui/react": "^2.2.2",
     "@radix-ui/themes": "^3.1.1",
     "axios": "^1.7.2",
     "body-parser": "^1.20.2",
@@ -17,6 +18,7 @@
     "cross-fetch": "^4.1.0",
     "dotenv": "^16.5.0",
     "express": "^4.18.2",
+    "lodash-es": "^4.17.21",
     "openai": "^4.96.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -30,6 +32,7 @@
   "devDependencies": {
     "@types/dotenv": "^8.2.3",
     "@types/express": "^4.17.21",
+    "@types/lodash-es": "^4.17.12",
     "@types/node": "^20.9.3",
     "@types/react": "^18.0.38",
     "@types/react-dom": "^18.2.16",
