@@ -1,7 +1,38 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
 import { debounce } from 'lodash-es';
 import Uploader from './Uploader';
+
+import { clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs: Parameters<typeof clsx>) {
+  return twMerge(clsx(inputs));
+}
+
+// Theme configuration
+const themes = {
+  light: {
+    background: 'bg-white',
+    text: 'text-gray-900',
+    button: 'bg-blue-500 hover:bg-blue-600 text-white',
+    card: 'bg-gray-50 border-gray-200',
+  },
+  dark: {
+    background: 'bg-gray-900',
+    text: 'text-gray-100',
+    button: 'bg-blue-600 hover:bg-blue-700 text-white',
+    card: 'bg-gray-800 border-gray-700',
+  },
+  professional: {
+    background: 'bg-slate-50',
+    text: 'text-slate-800',
+    button: 'bg-slate-700 hover:bg-slate-800 text-white',
+    card: 'bg-white border-slate-300',
+  }
+} as const;
+
+type Theme = keyof typeof themes;
 
 export default function App() {
   const [input, setInput] = useState('');
@@ -10,14 +41,61 @@ export default function App() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
+  const [theme, setTheme] = useState<Theme>('light');
 
-  // Document search handler
+  const handleSend = async () => {
+    if (!input.trim()) return;
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: input, context: documentText })
+      });
+
+      const data = await response.json();
+      setMessages(prev => [...prev, `Q: ${input}`, `A: ${data.reply}`]);
+      setInput('');
+    } catch (error) {
+      console.error('Request failed:', error);
+      setMessages(prev => [...prev, `Error: ${(error as Error).message}`]);
+    }
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd/Ctrl + K - Open search
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsSearchOpen(true);
+      }
+
+      // Cmd/Ctrl + Enter - Submit message
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleSend();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleSend]);
+
+  // Theme variant utilities
+  const themeClasses = themes[theme];
+  const getVariant = (component: keyof typeof themes.light) =>
+    cn(themes[theme][component], {
+      'dark:bg-gray-900 dark:text-white': theme === 'dark', // Optional dark mode support
+    });
+
+  // Debounced document search (memoized)
   const handleSearch = useCallback(
     debounce(async (query: string) => {
       if (!documentText) return;
 
       setIsLoadingSearch(true);
-      await new Promise(resolve => setTimeout(resolve, 300)); // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       const results = documentText
         .split('\n')
@@ -30,33 +108,31 @@ export default function App() {
     [documentText]
   );
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
-
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: input,
-          context: documentText
-        })
-      });
-
-      if (!response.ok) throw new Error('API request failed');
-
-      const data = await response.json();
-      setMessages(prev => [...prev, `Q: ${input}`, `A: ${data.reply}`]);
-      setInput('');
-    } catch (error) {
-      console.error('Request failed:', error);
-      setMessages(prev => [...prev, `Error: ${(error as Error).message}`]);
-    }
-  };
-
   return (
-    <div className='flex flex-col items-center gap-5 w-full max-w-2xl mx-auto p-4'>
-      {/* Document Search Modal */}
+    <div className={cn(
+      'min-h-screen p-4 flex flex-col items-center gap-5',
+      getVariant('background'),
+      getVariant('text')
+    )}>
+      {/* Theme Switcher */}
+      <div className="flex gap-2 self-end">
+        {Object.keys(themes).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTheme(t as Theme)}
+            className={cn(
+              'px-3 py-1 rounded-md text-sm',
+              theme === t
+                ? getVariant('button')
+                : 'bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600'
+            )}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Search Modal */}
       <Dialog
         open={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
@@ -115,46 +191,65 @@ export default function App() {
         </div>
       </Dialog>
 
-      {/* Main Chat Interface */}
-      <div className="w-full flex gap-4 items-center">
-        <Uploader onUpload={setDocumentText} />
-        <button
-          onClick={() => setIsSearchOpen(true)}
-          className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-          disabled={!documentText}
-        >
-          Search Doc
-        </button>
-      </div>
-
-      <div className="w-full bg-gray-50 rounded-lg p-4 shadow-inner">
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`p-3 mb-2 rounded-lg ${i % 2 === 0 ? 'bg-white shadow' : 'bg-blue-50'
-              }`}
+      {/* Main Interface */}
+      <div className="w-full max-w-2xl space-y-4">
+        <div className="flex gap-4 items-center">
+          <Uploader onUpload={setDocumentText} />
+          <button
+            onClick={() => setIsSearchOpen(true)}
+            className={cn(
+              'px-4 py-2 rounded-lg transition-colors',
+              getVariant('button')
+            )}
+            disabled={!documentText}
           >
-            {msg}
-          </div>
-        ))}
-      </div>
+            Search Doc (⌘K)
+          </button>
+        </div>
 
-      <div className="flex gap-2 w-full">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about the document"
-          className="flex-1 p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-          aria-label="Chat input"
-        />
-        <button
-          onClick={handleSend}
-          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:bg-gray-400"
-          disabled={!input.trim()}
-        >
-          Send
-        </button>
+        <div className={cn(
+          'rounded-lg p-4 shadow-inner',
+          getVariant('card'),
+          'border'
+        )}>
+          {messages.map((msg, i) => (
+            <div
+              key={i}
+              className={cn(
+                'p-3 mb-2 rounded-lg',
+                i % 2 === 0
+                  ? 'bg-white shadow dark:bg-gray-700'
+                  : 'bg-blue-50 dark:bg-blue-900'
+              )}
+            >
+              {msg}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex gap-2 w-full">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask about the document (⌘⏎)"
+            className={cn(
+              'flex-1 p-2 rounded-lg focus:ring-2 focus:ring-blue-500',
+              'border',
+              getVariant('background')
+            )}
+            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+          />
+          <button
+            onClick={handleSend}
+            className={cn(
+              'px-4 py-2 rounded-lg transition-colors',
+              getVariant('button')
+            )}
+            disabled={!input.trim()}
+          >
+            Send
+          </button>
+        </div>
       </div>
     </div>
   );
