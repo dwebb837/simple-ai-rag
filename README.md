@@ -18,8 +18,20 @@
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀• Deploy online using Vercel or Render
 ```
 ## Tasks
-TBW
-
+- Core AI Features
+  - Context-aware responses using document content
+  - Streaming responses with word-by-word display
+  - Error handling for API failures
+- UX Improvements
+  - Loading overlays with cancellation
+  - Message history persistence
+  - Responsive chat interface
+  - Keyboard shortcuts (⌘K search, ⌘⏎ send)
+- Architecture
+  - CORS-enabled express backend
+  - Type-safe API communication
+  - Modular component structure
+  
 ## Environment
 - OS: Windows 10
 - Node: v20.10.0
