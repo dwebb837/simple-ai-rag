@@ -35,6 +35,47 @@ const themes = {
 
 type Theme = keyof typeof themes;
 
+// IndexedDB Operations
+const initDB = async (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('ChatMemory', 1);
+
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains('conversations')) {
+        db.createObjectStore('conversations', { keyPath: 'id' });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const storeConversation = async (messages: string[]) => {
+  try {
+    const db = await initDB();
+    const tx = db.transaction('conversations', 'readwrite');
+    tx.objectStore('conversations').put({ id: 'current', messages });
+  } catch (error) {
+    console.error('Storage error:', error);
+  }
+};
+
+const loadConversation = async (): Promise<string[]> => {
+  try {
+    const db = await initDB();
+    const tx = db.transaction('conversations', 'readonly');
+    const request = tx.objectStore('conversations').get('current');
+    return new Promise((resolve) => {
+      request.onsuccess = () => resolve(request.result?.messages || []);
+      request.onerror = () => resolve([]);
+    });
+  } catch (error) {
+    return [];
+  }
+};
+
 export default function App() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<string[]>([]);
@@ -43,6 +84,29 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
   const [theme, setTheme] = useState<Theme>('light');
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  // Load conversation history on mount
+  useEffect(() => {
+    const loadHistory = async () => {
+      const savedMessages = await loadConversation();
+      setMessages(savedMessages);
+      setIsInitializing(false);
+    };
+    loadHistory();
+  }, []);
+
+  // Save conversation history on changes
+  useEffect(() => {
+    if (!isInitializing) {
+      storeConversation(messages);
+    }
+  }, [messages, isInitializing]);
+
+  const getContext = () => {
+    const last3QAPairs = messages.slice(-6).join('\n');
+    return `Document Context:\n${documentText}\n\nChat History:\n${last3QAPairs}`;
+  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -54,10 +118,7 @@ export default function App() {
     if (mathMatch) {
       try {
         const result = math.evaluate(mathMatch[0]);
-        setMessages(prev => [...prev,
-        `Q: ${input}`,
-        `System: Calculation: ${mathMatch[0]} = ${result}`
-        ]);
+        setMessages(prev => [...prev, `Q: ${input}`, `System: ${mathMatch[0]} = ${result}`]);
         setInput('');
         return;
       } catch (error) {
@@ -71,7 +132,10 @@ export default function App() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: input, context: documentText })
+        body: JSON.stringify({
+          question: input,
+          context: getContext()
+        })
       });
 
       const data = await response.json();
@@ -83,6 +147,7 @@ export default function App() {
     }
   };
 
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -118,6 +183,17 @@ export default function App() {
     cn(themes[theme][component], {
       'dark:bg-gray-900 dark:text-white': theme === 'dark',
     });
+
+  const handleClearHistory = async () => {
+    setMessages([]);
+    try {
+      const db = await initDB();
+      const tx = db.transaction('conversations', 'readwrite');
+      tx.objectStore('conversations').delete('current');
+    } catch (error) {
+      console.error('Clear history failed:', error);
+    }
+  };
 
   return (
     <div className={cn(
@@ -204,9 +280,12 @@ export default function App() {
       <div className="w-full max-w-2xl space-y-4">
         <div className="flex gap-4 items-center">
           <Uploader onUpload={setDocumentText} />
-          <Toolbar onToolSelect={(result) => {
-            setMessages(prev => [...prev, `System: ${result}`]);
-          }} />
+          <Toolbar
+            onToolSelect={(result) => {
+              setMessages(prev => [...prev, `System: ${result}`]);
+            }}
+            onClearHistory={handleClearHistory}
+          />
           <button
             onClick={() => setIsSearchOpen(true)}
             className={cn(
