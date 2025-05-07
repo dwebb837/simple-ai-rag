@@ -2,15 +2,16 @@ import { useState, useCallback, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
 import { debounce } from 'lodash-es';
 import Uploader from './Uploader';
-
+import Toolbar from './components/Toolbar';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import * as math from 'mathjs';
+import { DropdownMenu, Button } from '@radix-ui/themes';
 
 function cn(...inputs: Parameters<typeof clsx>) {
   return twMerge(clsx(inputs));
 }
 
-// Theme configuration
 const themes = {
   light: {
     background: 'bg-white',
@@ -46,6 +47,26 @@ export default function App() {
   const handleSend = async () => {
     if (!input.trim()) return;
 
+    // Auto-detect math expressions
+    const mathPattern = /(\d+[\+\-\*\/]\d+)/;
+    const mathMatch = input.match(mathPattern);
+
+    if (mathMatch) {
+      try {
+        const result = math.evaluate(mathMatch[0]);
+        setMessages(prev => [...prev,
+        `Q: ${input}`,
+        `System: Calculation: ${mathMatch[0]} = ${result}`
+        ]);
+        setInput('');
+        return;
+      } catch (error) {
+        setMessages(prev => [...prev, `Error: Invalid math expression`]);
+        setInput('');
+        return;
+      }
+    }
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -62,16 +83,12 @@ export default function App() {
     }
   };
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Cmd/Ctrl + K - Open search
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setIsSearchOpen(true);
       }
-
-      // Cmd/Ctrl + Enter - Submit message
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
         handleSend();
@@ -82,31 +99,25 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSend]);
 
-  // Theme variant utilities
-  const themeClasses = themes[theme];
-  const getVariant = (component: keyof typeof themes.light) =>
-    cn(themes[theme][component], {
-      'dark:bg-gray-900 dark:text-white': theme === 'dark', // Optional dark mode support
-    });
-
-  // Debounced document search (memoized)
   const handleSearch = useCallback(
     debounce(async (query: string) => {
       if (!documentText) return;
-
       setIsLoadingSearch(true);
       await new Promise(resolve => setTimeout(resolve, 300));
-
       const results = documentText
         .split('\n')
         .filter(line => line.toLowerCase().includes(query.toLowerCase()))
         .slice(0, 5);
-
       setSearchResults(results);
       setIsLoadingSearch(false);
     }, 500),
     [documentText]
   );
+
+  const getVariant = (component: keyof typeof themes.light) =>
+    cn(themes[theme][component], {
+      'dark:bg-gray-900 dark:text-white': theme === 'dark',
+    });
 
   return (
     <div className={cn(
@@ -114,7 +125,6 @@ export default function App() {
       getVariant('background'),
       getVariant('text')
     )}>
-      {/* Theme Switcher */}
       <div className="flex gap-2 self-end">
         {Object.keys(themes).map((t) => (
           <button
@@ -132,7 +142,6 @@ export default function App() {
         ))}
       </div>
 
-      {/* Search Modal */}
       <Dialog
         open={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
@@ -140,7 +149,11 @@ export default function App() {
       >
         <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
         <div className="fixed inset-0 flex items-center justify-center p-4">
-          <Dialog.Panel className="w-full max-w-md bg-white rounded-lg p-6 shadow-xl">
+          <Dialog.Panel className={cn(
+            'w-full max-w-md rounded-lg p-6 shadow-xl',
+            getVariant('card'),
+            'border'
+          )}>
             <div className="flex justify-between items-center mb-4">
               <Dialog.Title className="text-lg font-semibold">
                 Search Document
@@ -152,8 +165,6 @@ export default function App() {
                 ✕
               </button>
             </div>
-
-            {/* Search Combobox */}
             <div className="space-y-2">
               <input
                 type="text"
@@ -165,7 +176,6 @@ export default function App() {
                 }}
                 value={input}
               />
-
               <div className="max-h-60 overflow-y-auto border rounded-lg">
                 {isLoadingSearch ? (
                   <div className="p-3 text-gray-500">Searching...</div>
@@ -191,10 +201,12 @@ export default function App() {
         </div>
       </Dialog>
 
-      {/* Main Interface */}
       <div className="w-full max-w-2xl space-y-4">
         <div className="flex gap-4 items-center">
           <Uploader onUpload={setDocumentText} />
+          <Toolbar onToolSelect={(result) => {
+            setMessages(prev => [...prev, `System: ${result}`]);
+          }} />
           <button
             onClick={() => setIsSearchOpen(true)}
             className={cn(
