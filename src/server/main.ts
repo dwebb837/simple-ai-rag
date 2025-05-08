@@ -3,6 +3,7 @@ import bodyParser from "body-parser";
 import ViteExpress from "vite-express";
 import OpenAI from "openai";
 import dotenv from 'dotenv';
+import axios from 'axios';
 
 dotenv.config();
 
@@ -11,6 +12,8 @@ const openai = new OpenAI({
   apiKey: process.env.VITE_OPENAI_KEY,
   timeout: 10000 // 10-second timeout
 });
+
+const WEATHER_API_KEY = process.env.VITE_OPENWEATHER_API_KEY;
 
 const app = express();
 
@@ -23,6 +26,28 @@ app.use((req, res, next) => {
   next();
 });
 
+// Weather API endpoint
+app.get('/api/weather', async (req, res) => {
+  try {
+    const city = req.query.city;
+    if (!city) return res.status(400).json({ error: "City parameter required" });
+    
+    const response = await axios.get(
+      `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&appid=${WEATHER_API_KEY}`
+    );
+    
+    res.json({
+      temp: response.data.main.temp,
+      description: response.data.weather[0].description,
+      humidity: response.data.main.humidity,
+      wind: response.data.wind.speed
+    });
+  } catch (error) {
+    console.error("Weather API error:", error);
+    res.status(500).json({ error: "Failed to fetch weather data" });
+  }
+});
+
 // Robust chat api endpoint
 app.post('/api/chat', async (req, res) => {
   try {
@@ -33,23 +58,29 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: "Missing question parameter" });
     }
 
-    // Build context-aware prompt
-    const messages: any = [];
-    if (context) {
-      messages.push({
-        role: "system",
-        content: `Use this context to answer the question: ${context}`
-      });
+    let weatherContext = "";
+    const messages: any[] = [];
+    
+    // Detect weather query
+    const weatherMatch = question.match(/weather (?:in|for) ([\w\s]+)/i);
+    if (weatherMatch) {
+      try {
+        const city = weatherMatch[1];
+        const weatherRes = await axios.get(`http://localhost:3000/api/weather?city=${city}`);
+        weatherContext = `Current weather in ${city}: ${weatherRes.data.temp}°C, ${weatherRes.data.description}. Humidity: ${weatherRes.data.humidity}%, Wind: ${weatherRes.data.wind} m/s`;
+      } catch (error) {
+        weatherContext = "Weather data unavailable";
+      }
     }
-    messages.push({
-      role: "user",
-      content: question
-    });
 
-    // Get completion from OpenAI
+    if (context) messages.push({ role: "system", content: context });
+    if (weatherContext) messages.push({ role: "system", content: weatherContext });
+    messages.push({ role: "user", content: question });
+
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
-      messages: messages
+      messages: messages,
+      temperature: 0.7,
     });
 
     res.json({ reply: completion.choices[0].message.content });

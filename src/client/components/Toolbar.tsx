@@ -3,10 +3,12 @@ import { DropdownMenu, Button } from '@radix-ui/themes';
 
 export default function Toolbar({
     onToolSelect,
-    onClearHistory
+    onClearHistory,
+    onWeatherQuery,
 }: {
     onToolSelect: (result: string) => void,
-    onClearHistory: () => void
+    onClearHistory: () => void,
+    onWeatherQuery: (city?: string) => void,
 }) {
     const handleCalculation = (input: string) => {
         try {
@@ -33,8 +35,11 @@ export default function Toolbar({
                     Calculator
                 </DropdownMenu.Item>
 
-                <DropdownMenu.Separator />
+                <DropdownMenu.Item onClick={() => onWeatherQuery()}>
+                    🌤️ Get Weather
+                </DropdownMenu.Item>
 
+                <DropdownMenu.Separator />
                 <DropdownMenu.Item onClick={onClearHistory}>
                     🗑️ Clear History
                 </DropdownMenu.Item>

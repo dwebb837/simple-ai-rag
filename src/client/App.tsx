@@ -108,6 +108,27 @@ export default function App() {
     return `Document Context:\n${documentText}\n\nChat History:\n${last3QAPairs}`;
   };
 
+  const handleWeatherQuery = async (city?: string) => {
+    const cityName = city || prompt("Enter city name:");
+    if (!cityName) return;
+
+    try {
+      setMessages(prev => [...prev, `System: Fetching weather for ${cityName}`]);
+
+      const response = await fetch(`/api/weather?city=${encodeURIComponent(cityName)}`);
+      if (!response.ok) throw new Error('Weather API failed');
+
+      const data = await response.json();
+      setMessages(prev => [
+        ...prev,
+        `Weather: ${data.temp}°C, ${data.description}`,
+        `Details: Humidity ${data.humidity}%, Wind ${data.wind} m/s`
+      ]);
+    } catch (error) {
+      setMessages(prev => [...prev, `Error: Failed to get weather data`]);
+    }
+  };
+
   const handleSend = async () => {
     if (!input.trim()) return;
 
@@ -126,6 +147,13 @@ export default function App() {
         setInput('');
         return;
       }
+    }
+
+    const weatherMatch = input.match(/weather (?:in|for) ([\w\s]+)/i);
+    if (weatherMatch) {
+      handleWeatherQuery(weatherMatch[1]);
+      setInput('');
+      return;
     }
 
     try {
@@ -194,6 +222,8 @@ export default function App() {
       console.error('Clear history failed:', error);
     }
   };
+
+
 
   return (
     <div className={cn(
@@ -285,6 +315,7 @@ export default function App() {
               setMessages(prev => [...prev, `System: ${result}`]);
             }}
             onClearHistory={handleClearHistory}
+            onWeatherQuery={handleWeatherQuery}
           />
           <button
             onClick={() => setIsSearchOpen(true)}
@@ -310,7 +341,9 @@ export default function App() {
                 'p-3 mb-2 rounded-lg',
                 i % 2 === 0
                   ? 'bg-white shadow dark:bg-gray-700'
-                  : 'bg-blue-50 dark:bg-blue-900'
+                  : 'bg-blue-50 dark:bg-blue-900',
+                msg.startsWith('Weather:') && 'bg-green-50 dark:bg-green-900',
+                msg.startsWith('Details:') && 'bg-green-100 dark:bg-green-800'
               )}
             >
               {msg}
