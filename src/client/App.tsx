@@ -35,6 +35,25 @@ const themes = {
 
 type Theme = keyof typeof themes;
 
+interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+interface ChatCache {
+  [key: string]: {
+    reply: string;
+    tokens: TokenUsage;
+    timestamp: number;
+  };
+}
+
+const TOKEN_COST = {
+  input: 0.0015 / 1000,
+  output: 0.002 / 1000
+};
+
 // IndexedDB Operations
 const initDB = async (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
@@ -85,8 +104,14 @@ export default function App() {
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
   const [theme, setTheme] = useState<Theme>('light');
   const [isInitializing, setIsInitializing] = useState(true);
+  const [tokenUsage, setTokenUsage] = useState<TokenUsage>({
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0
+  });
+  const [totalCost, setTotalCost] = useState<number>(0);
+  const [cacheEnabled, setCacheEnabled] = useState<boolean>(true);
 
-  // Load conversation history on mount
   useEffect(() => {
     const loadHistory = async () => {
       const savedMessages = await loadConversation();
@@ -96,7 +121,6 @@ export default function App() {
     loadHistory();
   }, []);
 
-  // Save conversation history on changes
   useEffect(() => {
     if (!isInitializing) {
       storeConversation(messages);
@@ -106,6 +130,36 @@ export default function App() {
   const getContext = () => {
     const last3QAPairs = messages.slice(-6).join('\n');
     return `Document Context:\n${documentText}\n\nChat History:\n${last3QAPairs}`;
+  };
+
+  const getCacheKey = useCallback(() => {
+    return btoa(JSON.stringify({
+      question: input,
+      context: documentText
+    }));
+  }, [input, documentText]);
+
+  const checkCache = (): string | null => {
+    if (!cacheEnabled) return null;
+    const cache = JSON.parse(localStorage.getItem('chatCache') || '{}') as ChatCache;
+    const entry = cache[getCacheKey()];
+    return entry?.reply || null;
+  };
+
+  const updateCache = (reply: string, tokens: TokenUsage) => {
+    const cache = JSON.parse(localStorage.getItem('chatCache') || '{}') as ChatCache;
+    cache[getCacheKey()] = {
+      reply,
+      tokens,
+      timestamp: Date.now()
+    };
+    localStorage.setItem('chatCache', JSON.stringify(cache));
+  };
+
+  const clearCache = () => {
+    localStorage.removeItem('chatCache');
+    setTokenUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0 });
+    setTotalCost(0);
   };
 
   const handleWeatherQuery = async (city?: string) => {
@@ -132,10 +186,8 @@ export default function App() {
   const handleSend = async () => {
     if (!input.trim()) return;
 
-    // Auto-detect math expressions
     const mathPattern = /(\d+[\+\-\*\/]\d+)/;
     const mathMatch = input.match(mathPattern);
-
     if (mathMatch) {
       try {
         const result = math.evaluate(mathMatch[0]);
@@ -156,6 +208,13 @@ export default function App() {
       return;
     }
 
+    const cachedReply = checkCache();
+    if (cachedReply) {
+      setMessages(prev => [...prev, `Q: ${input}`, `A: (Cached) ${cachedReply}`]);
+      setInput('');
+      return;
+    }
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -167,6 +226,22 @@ export default function App() {
       });
 
       const data = await response.json();
+
+      setTokenUsage(prev => ({
+        promptTokens: prev.promptTokens + (data.tokens.promptTokens || 0),
+        completionTokens: prev.completionTokens + (data.tokens.completionTokens || 0),
+        totalTokens: prev.totalTokens + (data.tokens.totalTokens || 0)
+      }));
+
+      setTotalCost(prev => prev +
+        (data.tokens.promptTokens || 0) * TOKEN_COST.input +
+        (data.tokens.completionTokens || 0) * TOKEN_COST.output
+      );
+
+      if (cacheEnabled) {
+        updateCache(data.reply, data.tokens);
+      }
+
       setMessages(prev => [...prev, `Q: ${input}`, `A: ${data.reply}`]);
       setInput('');
     } catch (error) {
@@ -175,7 +250,6 @@ export default function App() {
     }
   };
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -222,8 +296,6 @@ export default function App() {
       console.error('Clear history failed:', error);
     }
   };
-
-
 
   return (
     <div className={cn(
@@ -308,6 +380,66 @@ export default function App() {
       </Dialog>
 
       <div className="w-full max-w-2xl space-y-4">
+        <div className={cn(
+          'p-4 rounded-lg shadow',
+          getVariant('card'),
+          'border flex flex-col gap-3'
+        )}>
+          <div className="flex justify-between items-center">
+            <h3 className="font-semibold">Usage Dashboard</h3>
+            <div className="flex gap-2">
+              <button
+                onClick={clearCache}
+                className={cn(
+                  'px-3 py-1 text-sm rounded-md',
+                  getVariant('button')
+                )}
+              >
+                Clear Cache
+              </button>
+              <button
+                onClick={() => setCacheEnabled(!cacheEnabled)}
+                className={cn(
+                  'px-3 py-1 text-sm rounded-md',
+                  cacheEnabled ? getVariant('button') : 'bg-gray-200'
+                )}
+              >
+                Cache: {cacheEnabled ? 'ON' : 'OFF'}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm">Total Tokens</p>
+              <p className="text-xl font-mono">
+                {tokenUsage.totalTokens.toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm">Estimated Cost</p>
+              <p className="text-xl font-mono">
+                ${totalCost.toFixed(4)}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <span className="text-gray-500">Input Tokens:</span>
+              <span className="ml-2">
+                {tokenUsage.promptTokens.toLocaleString()}
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-500">Output Tokens:</span>
+              <span className="ml-2">
+                {tokenUsage.completionTokens.toLocaleString()}
+              </span>
+            </div>
+          </div>
+        </div>
+
         <div className="flex gap-4 items-center">
           <Uploader onUpload={setDocumentText} />
           <Toolbar
@@ -343,7 +475,8 @@ export default function App() {
                   ? 'bg-white shadow dark:bg-gray-700'
                   : 'bg-blue-50 dark:bg-blue-900',
                 msg.startsWith('Weather:') && 'bg-green-50 dark:bg-green-900',
-                msg.startsWith('Details:') && 'bg-green-100 dark:bg-green-800'
+                msg.startsWith('Details:') && 'bg-green-100 dark:bg-green-800',
+                msg.startsWith('A: (Cached)') && 'bg-yellow-50 dark:bg-yellow-900'
               )}
             >
               {msg}

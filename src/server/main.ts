@@ -15,6 +15,12 @@ const openai = new OpenAI({
 
 const WEATHER_API_KEY = process.env.VITE_OPENWEATHER_API_KEY;
 
+interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 const app = express();
 
 // Essential middleware
@@ -31,11 +37,11 @@ app.get('/api/weather', async (req, res) => {
   try {
     const city = req.query.city;
     if (!city) return res.status(400).json({ error: "City parameter required" });
-    
+
     const response = await axios.get(
       `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&appid=${WEATHER_API_KEY}`
     );
-    
+
     res.json({
       temp: response.data.main.temp,
       description: response.data.weather[0].description,
@@ -53,14 +59,14 @@ app.post('/api/chat', async (req, res) => {
   try {
     // Destructure both question and context from request body
     const { question, context } = req.body;
-    
+
     if (!question) {
       return res.status(400).json({ error: "Missing question parameter" });
     }
 
     let weatherContext = "";
     const messages: any[] = [];
-    
+
     // Detect weather query
     const weatherMatch = question.match(/weather (?:in|for) ([\w\s]+)/i);
     if (weatherMatch) {
@@ -83,7 +89,16 @@ app.post('/api/chat', async (req, res) => {
       temperature: 0.7,
     });
 
-    res.json({ reply: completion.choices[0].message.content });
+    const tokenUsage: TokenUsage = {
+      promptTokens: completion.usage?.prompt_tokens || 0,
+      completionTokens: completion.usage?.completion_tokens || 0,
+      totalTokens: completion.usage?.total_tokens || 0
+    };
+
+    res.json({
+      reply: completion.choices[0].message.content,
+      tokens: tokenUsage
+    });
   } catch (error) {
     console.error("API Error:", error);
     res.status(500).json({ error: "AI service unavailable" });
